@@ -508,6 +508,7 @@ async function onTeamChange() {
       el.value = v.fip.toFixed(2);
       el.dataset.opener = v.isOpener ? 'true' : 'false';
       el.dataset.statcast = v.hasStatcast ? 'true' : 'false';
+      el.dataset.pitchHand = v.pitchHand || '';
       flash(el);
     } else if (v.kind === 'bp') {
       const el = document.getElementById(v.side + '_bp_ip');
@@ -538,6 +539,15 @@ async function onTeamChange() {
 }
 
 async function fetchSpFip(pid, season, isOpener, teamCode, statcast) {
+  let pitchHand = '';
+  try {
+    const handResult = await proxyFetch(MLB_API + '/people/' + pid + '?hydrate=currentTeam');
+    const person = handResult.data.people && handResult.data.people[0];
+    if (person && person.pitchHand && person.pitchHand.code) {
+      pitchHand = person.pitchHand.code;
+    }
+  } catch (e) { /* non-fatal */ }
+
   try {
     const url = MLB_API + '/people/' + pid + '/stats?stats=season&group=pitching&season=' + season;
     const result = await proxyFetch(url);
@@ -567,12 +577,12 @@ async function fetchSpFip(pid, season, isOpener, teamCode, statcast) {
       if (detectedOpener) {
         const bpEra = await fetchBullpenEraAsFip(teamCode, season);
         fip = fip * 0.4 + bpEra * 0.6;
-        return { fip, isOpener: true, hasStatcast: blended.hasStatcast };
+        return { fip, isOpener: true, hasStatcast: blended.hasStatcast, pitchHand };
       }
-      return { fip, isOpener: false, hasStatcast: blended.hasStatcast };
+      return { fip, isOpener: false, hasStatcast: blended.hasStatcast, pitchHand };
     }
   } catch (e) { /* ignore */ }
-  return { fip: 4.20, isOpener: false, hasStatcast: false };
+  return { fip: 4.20, isOpener: false, hasStatcast: false, pitchHand };
 }
 
 // Fetch team season pitching ERA as a proxy for bullpen quality in opener games
@@ -1056,8 +1066,9 @@ function runAnalysis() {
     awayWoba = lineupXwoba.away;
     awayLineupSource = 'confirmed lineup xwOBA';
   } else {
-    awayWoba = away.vsRHP; // fallback to team-level (handedness not split here — improvement in P2)
-    awayLineupSource = 'team-level estimate';
+    const homeSPHand = document.getElementById('home_fip').dataset.pitchHand || '';
+    awayWoba = homeSPHand === 'L' ? away.vsLHP : away.vsRHP;
+    awayLineupSource = 'team-level (' + (homeSPHand === 'L' ? 'vsLHP' : 'vsRHP') + ')';
   }
   
   let homeWoba, homeLineupSource;
@@ -1065,8 +1076,9 @@ function runAnalysis() {
     homeWoba = lineupXwoba.home;
     homeLineupSource = 'confirmed lineup xwOBA';
   } else {
-    homeWoba = home.vsRHP;
-    homeLineupSource = 'team-level estimate';
+    const awaySPHand = document.getElementById('away_fip').dataset.pitchHand || '';
+    homeWoba = awaySPHand === 'L' ? home.vsLHP : home.vsRHP;
+    homeLineupSource = 'team-level (' + (awaySPHand === 'L' ? 'vsLHP' : 'vsRHP') + ')';
   }
   
   const awayOff = 1 + (awayWoba - LEAGUE_AVG_XWOBA) * 5;
